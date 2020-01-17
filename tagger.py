@@ -251,8 +251,8 @@ class Tagger(nn.Module):
         self.linear = nn.Linear(v_dim, tagset_size)
 
 
-    def forward(self, sample):
-        premise_data, hyp_data, tag_b = sample
+    def forward(self, premise_data, hyp_data):
+        premise_data, hyp_data
 
         padded_premise_w = premise_data['w_data']
         premise_w_lens = premise_data['w_lens']
@@ -370,8 +370,11 @@ class Run(object):
 
                 tagger.zero_grad()
                 #batch_data_list, batch_label_list, batch_len_list, padded_sublens = sample
-                
-                batch_tag_score = tagger.forward(sample)
+                premise_data, hyp_data, batch_label_list = sample 
+
+                batch_tag_score = tagger.forward(premise_data, hyp_data)
+                print("batch tag score shape: " + str(batch_tag_score.shape))
+                print("batch label list shape: " + str(len(batch_label_list)))
               
                 flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
 
