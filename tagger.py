@@ -179,14 +179,14 @@ class MLP(nn.Module):
         use_dropout = dropout > 0
         self.layers = []
         
-        self.layers.append(nn.Linear(i_dim, i_dim))
-        if use_dropout:
-            self.layers.append(nn.Droptout(dropout))
-        self.layers.append(nn.ReLU())
-        
         self.layers.append(nn.Linear(i_dim, o_dim))
         if use_dropout:
-            self.layers.append(nn.Droptout(dropout))
+            self.layers.append(nn.Dropout(dropout))
+        self.layers.append(nn.ReLU())
+        
+        self.layers.append(nn.Linear(o_dim, o_dim))
+        if use_dropout:
+            self.layers.append(nn.Dropout(dropout))
         self.layers.append(nn.ReLU())
         
     def forward(self, vec):
@@ -198,7 +198,7 @@ class MLP(nn.Module):
 class Attention(nn.Module):
     def __init__(self, hidden_dim, f_dim):
         super(Attention, self).__init__()
-        self.F = MLP(hidden_dim, f_dim)
+        self.F = MLP(hidden_dim, f_dim, 0.1)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, a, b):
@@ -232,7 +232,7 @@ class Attention(nn.Module):
 
 class Tagger(nn.Module):
     def __init__(self, embedding_dim, projected_dim, tagset_size,
-            translator, f_dim=30, dropout=False): 
+            translator, f_dim=50, v_dim=50, dropout=False): 
         super(Tagger, self).__init__()
         self.embedding_dim = embedding_dim
 
@@ -245,11 +245,11 @@ class Tagger(nn.Module):
                                                         padding_idx = translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
         self.project = nn.Linear(embedding_dim, projected_dim)
-        
         self.attention = Attention(hidden_dim=projected_dim, f_dim = f_dim)
+        self.G = MLP(f_dim*2, v_dim, 0.1)
+        self.H = MLP(v_dim*2, v_dim, 0.1)
+        self.linear = nn.Linear(v_dim, tagset_size)
 
-        self.dropout_0 = nn.Dropout()
-        
 
     def forward(self, sample):
         premise_data, hyp_data, tag_b = sample
@@ -271,8 +271,24 @@ class Tagger(nn.Module):
 
         beta, alpha = self.attention(prem_w_e, hyp_w_e)
 
+        #Compare
+        ##Concat to each it's weights
+        weighted_a = torch.cat((prem_w_e, beta), 2)
+        weighted_b = torch.cat((hyp_w_e, alpha), 2)
+
+        ##Feedforward
+        v1 = self.G(weighted_a)
+        v2 = self.G(weighted_b)
+
+        #Aggregate
+        v1 = torch.sum(v1, 1)
+        v2 = torch.sum(v2, 1)
+
+        h_in = torch.cat((v1,v2), 1)
+        y = self.H(h_in)
+        y = self.linear(y)
       
-        return shaped
+        return y
 
     def getLabel(self, data):
         _, prediction_argmax = torch.max(data, 1)
