@@ -172,14 +172,69 @@ class Padding(object):
         hyp_data = {'w_data': padded_hyp_w, 'w_lens': hyp_w_lens}
         return premise_data, hyp_data, tag_b
 
- 
+
+class MLP(nn.Module):
+    def __init__(self, i_dim, o_dim, dropout=0):
+        super(MLP, self).__init__()
+        use_dropout = dropout > 0
+        self.layers = []
+        
+        self.layers.append(nn.Linear(i_dim, i_dim))
+        if use_dropout:
+            self.layers.append(nn.Droptout(dropout))
+        self.layers.append(nn.ReLU())
+        
+        self.layers.append(nn.Linear(i_dim, o_dim))
+        if use_dropout:
+            self.layers.append(nn.Droptout(dropout))
+        self.layers.append(nn.ReLU())
+        
+    def forward(self, vec):
+        r = vec
+        for layer in self.layers:
+            r = layer(r)
+        return r
+
+class Attention(nn.Module):
+    def __init__(self, hidden_dim, f_dim):
+        super(Attention, self).__init__()
+        self.F = MLP(hidden_dim, f_dim)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, a, b):
+        # a is of shape batch x sentence_a x hidden_dim
+        # b is of shape batch x sentence_b x hidden_dim
+        batch_size = a.shape[0]
+        fa = self.F(a)
+        fb = self.F(b)
+
+        # We want to calculate e_ij = fa_i * fb_j
+        # fa shape: batch x sentence_a x hidden_dim
+        # fb shape: batch x sentence_b x hidden_dim
+        ## Per batch calculation: 
+        ## calc fa x fb.transpose() gives sentence_a x sentence_b
+        E = torch.bmm(fa, torch.transpose(fb, 1, 2))
+
+        # E shape: batch x sentence_a x sentence_b
+        ## for beta needs: (batch*sentence_a)*sentence_b
+        E4beta = self.softmax(E.view(-1, b.shape[1]))
+        E4beta = E4beta.view(E.shape)
+        beta = torch.bmm(E4beta, b)
+        
+        E4alpha = torch.transpose(E, 1, 2)
+        saved_shape = E4alpha.shape
+        E4alpha = self.softmax(E4alpha.reshape(-1, a.shape[1]))
+        # alpha is (batch*sentence_b) x sentence a
+        E4alpha = E4alpha.view(saved_shape)
+        alpha = torch.bmm(E4alpha, a)
+
+        return beta, alpha
 
 class Tagger(nn.Module):
     def __init__(self, embedding_dim, projected_dim, tagset_size,
-            translator, dropout=False): 
+            translator, f_dim=30, dropout=False): 
         super(Tagger, self).__init__()
         self.embedding_dim = embedding_dim
-        
 
         # Creat Embeddings
         vecs = GLOVE_DATA.vectors
@@ -190,6 +245,8 @@ class Tagger(nn.Module):
                                                         padding_idx = translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
         self.project = nn.Linear(embedding_dim, projected_dim)
+        
+        self.attention = Attention(hidden_dim=projected_dim, f_dim = f_dim)
 
         self.dropout_0 = nn.Dropout()
         
@@ -211,6 +268,8 @@ class Tagger(nn.Module):
         #Project the embeddings to smaller vector
         prem_w_e = self.project(prem_w_e)
         hyp_w_e = self.project(hyp_w_e)
+
+        beta, alpha = self.attention(prem_w_e, hyp_w_e)
 
       
         return shaped
