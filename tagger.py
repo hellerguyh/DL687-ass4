@@ -174,10 +174,10 @@ class Padding(object):
 
  
 
-class BiLSTM(nn.Module):
+class Tagger(nn.Module):
     def __init__(self, embedding_dim, projected_dim, tagset_size,
             translator, dropout=False): 
-        super(BiLSTM, self).__init__()
+        super(Tagger, self).__init__()
         self.embedding_dim = embedding_dim
         
 
@@ -208,15 +208,10 @@ class BiLSTM(nn.Module):
         prem_w_e = self.wembeddings(torch.tensor(padded_premise_w).long())
         hyp_w_e = self.wembeddings(torch.tensor(padded_hyp_w).long())
 
-        print(prem_w_e.shape)
-        print(hyp_w_e.shape)
-
         #Project the embeddings to smaller vector
         prem_w_e = self.project(prem_w_e)
         hyp_w_e = self.project(hyp_w_e)
 
-        print(prem_w_e.shape)
-        print(hyp_w_e.shape)
       
         return shaped
 
@@ -261,7 +256,7 @@ class Run(object):
         print("done")
 
         print("init tagger")
-        tagger = BiLSTM(embedding_dim = self.edim, projected_dim = self.rnn_h_dim,
+        tagger = Tagger(embedding_dim = self.edim, projected_dim = self.rnn_h_dim,
                 translator=self.wTran, tagset_size = self.lTran.getLengths()['tag'] + 1,
                 dropout = self.dropout)
         print("done")
