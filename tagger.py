@@ -373,17 +373,18 @@ class Run(object):
                 premise_data, hyp_data, batch_label_list = sample 
 
                 batch_tag_score = tagger.forward(premise_data, hyp_data)
-                print("batch tag score shape: " + str(batch_tag_score.shape))
-                print("batch label list shape: " + str(len(batch_label_list)))
               
-                flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
+                #flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
 
                 #calc accuracy
-                c, t = self._calc_batch_acc(tagger, flatten_tag, flatten_label)
-                correct_cntr += c 
-                total_cntr += t
+                #c, t = self._calc_batch_acc(tagger, flatten_tag, flatten_label)
+                batch_label_tensor = torch.LongTensor(batch_label_list)
+                #c, t = self._calc_batch_acc(tagger, batch_tag_score, batch_label_tensor)
+                #correct_cntr += c 
+                #total_cntr += t
 
-                loss = loss_function(flatten_tag, flatten_label)
+                #loss = loss_function(flatten_tag, flatten_label)
+                loss = loss_function(batch_tag_score, batch_label_tensor)
                 loss_acc += loss.item()
                 loss.backward()
                 optimizer.step()
@@ -394,7 +395,7 @@ class Run(object):
                         self.runOnDev(tagger, padder) 
                 
             print("epoch: " + str(epoch) + " " + str(loss_acc))
-            print("Train accuracy " + str(correct_cntr/total_cntr))
+            #print("Train accuracy " + str(correct_cntr/total_cntr))
            
         if self.save_to_file:
             self._save_model_params(tagger, self.wTran, self.lTran)
@@ -418,7 +419,7 @@ if __name__ == "__main__":
     train_file = "./data/snli_1.0/small_dataset.jsonl"
                  #"sys.argv[1]
     model_file = 'SOMEMODEL' #sys.argv[2]
-    epochs = 1 #int(sys.argv[3])
+    epochs = 100 #int(sys.argv[3])
     run_dev = 'n' #sys.argv[4]
     if run_dev == 'y':
         run_dev = True
