@@ -175,25 +175,23 @@ class Padding(object):
  
 
 class BiLSTM(nn.Module):
-    def __init__(self, embedding_dim, hidden_rnn_dim, tagset_size,
+    def __init__(self, embedding_dim, projected_dim, tagset_size,
             translator, dropout=False): 
         super(BiLSTM, self).__init__()
         self.embedding_dim = embedding_dim
         
 
         # Creat Embeddings
-        ## Need to project down vectors to dim = 200
         vecs = GLOVE_DATA.vectors
-
         ## Add to glove vectors 2 vectors for unknown and padding:
         pad = torch.zeros((2,vecs[0].shape[0]))
         vecs = torch.cat((vecs, pad), 0)
-        self.wembeddings = nn.Embedding.from_pretrained(embeddings = vecs, freeze=False,
+        self.wembeddings = nn.Embedding.from_pretrained(embeddings = vecs, freeze=True,
                                                         padding_idx = translator.getPaddingIndex()['w'])
+        ## project down the vectors to 200dim
+        self.project = nn.Linear(embedding_dim, projected_dim)
 
-        
-
-        self.dropout_0 = nn.Dropout()  
+        self.dropout_0 = nn.Dropout()
         
 
     def forward(self, sample):
@@ -209,8 +207,17 @@ class BiLSTM(nn.Module):
 
         prem_w_e = self.wembeddings(torch.tensor(padded_premise_w).long())
         hyp_w_e = self.wembeddings(torch.tensor(padded_hyp_w).long())
+
+        print(prem_w_e.shape)
+        print(hyp_w_e.shape)
+
+        #Project the embeddings to smaller vector
+        prem_w_e = self.project(prem_w_e)
+        hyp_w_e = self.project(hyp_w_e)
+
+        print(prem_w_e.shape)
+        print(hyp_w_e.shape)
       
-        print(prem_w_e[0])
         return shaped
 
     def getLabel(self, data):
@@ -254,7 +261,7 @@ class Run(object):
         print("done")
 
         print("init tagger")
-        tagger = BiLSTM(embedding_dim = self.edim, hidden_rnn_dim = self.rnn_h_dim,
+        tagger = BiLSTM(embedding_dim = self.edim, projected_dim = self.rnn_h_dim,
                 translator=self.wTran, tagset_size = self.lTran.getLengths()['tag'] + 1,
                 dropout = self.dropout)
         print("done")
@@ -327,7 +334,7 @@ class Run(object):
 
 
 FAVORITE_RUN_PARAMS = { 
-                'EMBEDDING_DIM' : 50, 
+                'EMBEDDING_DIM' : 100, 
                 'RNN_H_DIM' : 50, 
                 'EPOCHS' : 20, 
                 'BATCH_SIZE' : 2,
