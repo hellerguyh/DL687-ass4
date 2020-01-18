@@ -19,7 +19,7 @@ def DEBUG_PRINT(x):
 deviceCuda = torch.device("cuda")
 deviceCPU = torch.device("cpu")
 USE_CUDA = False
-GLOVE_DATA = GloVe(name='6B', dim=300)
+GLOVE_DATA = GloVe(name='6B', dim=300, cache = './glove_cache/')
 
 
 def list2dict(lst):
@@ -205,11 +205,14 @@ class MLP(nn.Module):
             self.layers.append(nn.Dropout(dropout))
         self.layers.append(nn.ReLU())
 
+        self.layers = nn.Sequential(*self.layers)
+
     def forward(self, vec):
-        r = vec
-        for layer in self.layers:
-            r = layer(r)
-        return r
+        return self.layers(vec)
+        #r = vec
+        #for layer in self.layers:
+        #    r = layer(r)
+        #return r
 
     def toCuda(self):
       for layer in self.layers:
@@ -265,6 +268,7 @@ class Tagger(nn.Module):
 
         # Creat Embeddings
         vecs = GLOVE_DATA.vectors
+        vecs = vecs/torch.norm(vecs, dim=1, keepdim=True)
         ## Add to glove vectors 2 vectors for unknown and padding:
         pad = torch.zeros((2, vecs[0].shape[0]))
         vecs = torch.cat((vecs, pad), 0)
@@ -484,6 +488,7 @@ class Run(object):
                 loss.backward()
                 optimizer.step()
 
+
             self.runOnDev(tagger, padder)
             print("epoch: " + str(epoch) + " " + str(loss_acc))
             print("Train accuracy " + str(correct_cntr/total_cntr))
@@ -509,7 +514,7 @@ FAVORITE_RUN_PARAMS = {
 if __name__ == "__main__":
     FOLDER_PATH = "./data/snli_1.0/"
     #FOLDER_PATH = "./gdrive/My Drive/Master/DL687/As4/1606.01933/data/snli_1.0/"
-    train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
+    train_file = FOLDER_PATH + "small_dataset.jsonl"#"snli_1.0_train.jsonl"
                      #"sys.argv[1]
     model_file = 'SOMEMODEL' #sys.argv[2]
     epochs = 100 #int(sys.argv[3])
