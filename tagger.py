@@ -330,22 +330,7 @@ class Run(object):
 
     def _calc_batch_acc(self, tagger, flatten_tag, flatten_label):
         predicted_tags = tagger.getLabel(flatten_tag)
-        # print(predicted_tags)
-        # print(flatten_label)
         diff = predicted_tags - flatten_label
-        # no_diff = (diff == 0)
-        # #print(no_diff)
-        # padding_mask = (flatten_label == self.lTran.getLengths()['tag'])
-        # #print("padding_mask")
-        # #print(padding_mask)
-
-        # no_diff_and_padding_label = no_diff*padding_mask
-
-        # to_ignore = len(no_diff_and_padding_label[no_diff_and_padding_label == True])
-        # #print(to_ignore)
-        # tmp = len(diff[diff == 0]) - to_ignore
-        # if tmp < 0:
-        #     raise Exception("non valid tmp value")
         correct_cntr = len(diff[diff == 0])  # tmp
         total_cntr = len(predicted_tags)  # - to_ignore
         return correct_cntr, total_cntr
@@ -460,9 +445,9 @@ class Run(object):
                 # calc accuracy
                 # c, t = self._calc_batch_acc(tagger, flatten_tag, flatten_label)
                 batch_label_tensor = torch.LongTensor(batch_label_list)
-                # c, t = self._calc_batch_acc(tagger, batch_tag_score, batch_label_tensor)
-                # correct_cntr += c
-                # total_cntr += t
+                c, t = self._calc_batch_acc(tagger, batch_tag_score, batch_label_tensor)
+                correct_cntr += c
+                total_cntr += t
 
                 # loss = loss_function(flatten_tag, flatten_label)
                 loss = loss_function(batch_tag_score, batch_label_tensor)
@@ -470,13 +455,9 @@ class Run(object):
                 loss.backward()
                 optimizer.step()
 
-                if sentences_seen >= 500:
-                    sentences_seen = 0
-                    if self.run_dev:
-                        self.runOnDev(tagger, padder)
-
+            self.runOnDev(tagger, padder)
             print("epoch: " + str(epoch) + " " + str(loss_acc))
-            # print("Train accuracy " + str(correct_cntr/total_cntr))
+            print("Train accuracy " + str(correct_cntr/total_cntr))
 
         if self.save_to_file:
             self._save_model_params(tagger, self.wTran, self.lTran)
@@ -497,7 +478,7 @@ FAVORITE_RUN_PARAMS = {
 }
 
 if __name__ == "__main__":
-    FOLDER_PATH = "../"
+    FOLDER_PATH = "./"
     train_file = FOLDER_PATH + "snli_1.0/snli_1.0_short.0/snli_1.0_train.jsonl"
                      #"sys.argv[1]
     model_file = 'SOMEMODEL' #sys.argv[2]
