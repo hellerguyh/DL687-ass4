@@ -428,8 +428,8 @@ class Run(object):
             total_cntr = 0
             sentences_seen = 0
             for sample in train_dataloader:
-                if progress1 / 1000 == progress2:
-                    print("reached " + str(progress2 * 1000))
+                if progress1 / 100000 == progress2:
+                    print("reached " + str(progress2 * 100000))
                     progress2 += 1
                 progress1 += self.batch_size
                 sentences_seen += self.batch_size
@@ -473,18 +473,18 @@ FAVORITE_RUN_PARAMS = {
     'EMBEDDING_DIM': 300,
     'RNN_H_DIM': 200,
     'EPOCHS': 20,
-    'BATCH_SIZE': 4,
+    'BATCH_SIZE': 100,
     'LEARNING_RATE': 0.05
 }
 
 if __name__ == "__main__":
-    FOLDER_PATH = "./"
-    train_file = FOLDER_PATH + "snli_1.0/snli_1.0_short.0/snli_1.0_train.jsonl"
+    FOLDER_PATH = "./data/snli_1.0/"
+    train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
                      #"sys.argv[1]
     model_file = 'SOMEMODEL' #sys.argv[2]
     epochs = 100 #int(sys.argv[3])
     run_dev = True #sys.argv[4]
-    dev_file = FOLDER_PATH + "snli_1.0/snli_1.0_short.0/snli_1.0_dev.jsonl"
+    dev_file = FOLDER_PATH + "snli_1.0_dev.jsonl"
 
     RUN_PARAMS = FAVORITE_RUN_PARAMS
     RUN_PARAMS.update({
