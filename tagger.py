@@ -169,7 +169,7 @@ class Padding(object):
         padded_data = np.ones((batch_size, max_l)) * padIndex
         for i, data in enumerate(data_b):
             padded_data[i][:len_b[i]] = data  # first embeddings
-        return padded_data
+        return padded_data.astype(int)
 
     def collate_fn(self, data):
         # data.sort(key=lambda x: x[2], reverse=True)
@@ -299,7 +299,7 @@ class Tagger(nn.Module):
         if USE_CUDA:
           padded_premise_w = torch.from_numpy(padded_premise_w).to(deviceCuda)
           padded_hyp_w = torch.from_numpy(padded_hyp_w).to(deviceCuda)
-          
+
         prem_w_e = self.wembeddings(torch.tensor(padded_premise_w).long())
         hyp_w_e = self.wembeddings(torch.tensor(padded_hyp_w).long())
 
