@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import random as r
-
 from torchnlp.word_to_vector import GloVe
 import json
 
@@ -17,7 +16,9 @@ def DEBUG_PRINT(x):
     if DEBUG:
         print(x)
 
-
+deviceCuda = torch.device("cuda")
+deviceCPU = torch.device("cpu")
+USE_CUDA = False
 GLOVE_DATA = GloVe(name='6B', dim=300)
 
 
@@ -210,12 +211,21 @@ class MLP(nn.Module):
             r = layer(r)
         return r
 
+    def toCuda(self):
+      for layer in self.layers:
+        layer.to(deviceCuda)
+
 
 class Attention(nn.Module):
     def __init__(self, hidden_dim, f_dim):
         super(Attention, self).__init__()
         self.F = MLP(hidden_dim, f_dim, 0.2)
         self.softmax = nn.Softmax(dim=1)
+
+    def toCuda(self):
+      print("changign F to CUDA")
+      self.F.to(deviceCuda)
+      self.F.toCuda()
 
     def forward(self, a, b):
         # a is of shape batch x sentence_a x hidden_dim
@@ -267,6 +277,14 @@ class Tagger(nn.Module):
         self.H = MLP(v_dim * 2, v_dim, 0.2)
         self.linear = nn.Linear(v_dim, tagset_size)
 
+    def toCuda(self):
+      self.G.to(deviceCuda)
+      self.G.toCuda()
+      self.H.to(deviceCuda)
+      self.H.toCuda()
+      self.attention.to(deviceCuda)
+      self.attention.toCuda()
+
     def forward(self, premise_data, hyp_data):
         premise_data, hyp_data
 
@@ -278,6 +296,10 @@ class Tagger(nn.Module):
 
         batch_size = len(padded_premise_w)
 
+        if USE_CUDA:
+          padded_premise_w = torch.from_numpy(padded_premise_w).to(deviceCuda)
+          padded_hyp_w = torch.from_numpy(padded_hyp_w).to(deviceCuda)
+          
         prem_w_e = self.wembeddings(torch.tensor(padded_premise_w).long())
         hyp_w_e = self.wembeddings(torch.tensor(padded_hyp_w).long())
 
@@ -303,6 +325,9 @@ class Tagger(nn.Module):
         h_in = torch.cat((v1, v2), 1)
         y = self.H(h_in)
         y = self.linear(y)
+
+        if USE_CUDA:
+          y = y.to(deviceCPU)
 
         return y
 
@@ -418,6 +443,10 @@ class Run(object):
         print("Starting training")
         print("data length = " + str(len(train_dataset)))
 
+        if USE_CUDA:
+          tagger.to(deviceCuda)
+          tagger.toCuda()
+
         if self.run_dev:
             self.runOnDev(tagger, padder)
         for epoch in range(self.num_epochs):
@@ -435,9 +464,9 @@ class Run(object):
                 sentences_seen += self.batch_size
 
                 tagger.zero_grad()
+
                 # batch_data_list, batch_label_list, batch_len_list, padded_sublens = sample
                 premise_data, hyp_data, batch_label_list = sample
-
                 batch_tag_score = tagger.forward(premise_data, hyp_data)
 
                 # flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
@@ -479,6 +508,7 @@ FAVORITE_RUN_PARAMS = {
 
 if __name__ == "__main__":
     FOLDER_PATH = "./data/snli_1.0/"
+    #FOLDER_PATH = "./gdrive/My Drive/Master/DL687/As4/1606.01933/data/snli_1.0/"
     train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
                      #"sys.argv[1]
     model_file = 'SOMEMODEL' #sys.argv[2]
