@@ -407,7 +407,8 @@ class Run(object):
 
         print("define loss and optimizer")
         loss_function = nn.CrossEntropyLoss()  # ignore_index=len(lTran.tag_dict))
-        optimizer = torch.optim.Adagrad(tagger.parameters(), lr=self.learning_rate)  # 0.01)
+        optimizer = torch.optim.Adagrad(tagger.parameters(), lr=self.learning_rate,
+                                        initial_accumulator_value=0.1)  # 0.01)
         print("done")
 
         print("init padder")
