@@ -220,7 +220,7 @@ class Tagger(nn.Module):
         vecs = vecs / torch.norm(vecs, dim=1, keepdim=True)
         ## Add to glove vectors 100 vectors for unknown and one for padding:
         for i in range(100):
-            pad = torch.normal(mean=torch.zeros(1, vecs[0].shape[0]), std=0.1)
+            pad = torch.normal(mean=torch.zeros(1, vecs[0].shape[0]), std=1)
             vecs = torch.cat((vecs, pad), 0)
         pad = torch.zeros(1, vecs[0].shape[0])
         vecs = torch.cat((vecs, pad), 0)
