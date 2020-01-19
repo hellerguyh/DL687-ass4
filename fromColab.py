@@ -8,7 +8,18 @@ import json
 
 import sys
 
-FOLDER_PATH = "./gdrive/My Drive/Master/DL687/As4/1606.01933/data/snli_1.0/"
+SHORT_RUN = True
+if SHORT_RUN:
+    FOLDER_PATH = "/home/ranz/projects/msc_projects/deep_for_seq_4/DL687-ass4/snli_1.0/snli_1.0_short.0/"
+    GLOVE_REL_DIR = "../../"
+    USE_CUDA = False  # True
+    USE_840 = False  # True
+else:
+    FOLDER_PATH = "./gdrive/My Drive/Master/DL687/As4/1606.01933/data/snli_1.0/"
+    GLOVE_REL_DIR = ""
+    USE_CUDA = True  # True
+    USE_840 = True  # True
+
 DEBUG = True
 
 
@@ -16,14 +27,14 @@ def DEBUG_PRINT(x):
     if DEBUG:
         print(x)
 
+
 deviceCuda = torch.device("cuda")
 deviceCPU = torch.device("cpu")
-USE_CUDA = True
-USE_840 = True
+
 if USE_840:
-  GLOVE_DATA = GloVe(name='840B', dim=300, cache=FOLDER_PATH+'glove_cache/')
+    GLOVE_DATA = GloVe(name='840B', dim=300, cache=FOLDER_PATH + GLOVE_REL_DIR + 'glove_cache/')
 else:
-  GLOVE_DATA = GloVe(name='6B', dim=300, cache=FOLDER_PATH+'glove_cache/')
+    GLOVE_DATA = GloVe(name='6B', dim=300, cache=FOLDER_PATH + GLOVE_REL_DIR + 'glove_cache/')
 
 
 def list2dict(lst):
@@ -97,7 +108,7 @@ class WTranslator(object):
             unknown_idx = len(GLOVE_DATA)
             self.unknown_cntr = 0
             self.unknown_dict = {}
-            #self.wdict.update({"UNKNOWN": unknown_idx})
+            # self.wdict.update({"UNKNOWN": unknown_idx})
             self.wpadding_idx = unknown_idx + 100
             self.cntr = 0
             self.total_cntr = 0
@@ -118,16 +129,16 @@ class WTranslator(object):
             try:
                 return self.unknown_dict[val]
             except KeyError:
-                self.unknown_dict.update({val:self.unknown_cntr + self.unknown_base})
-                self.unknown_cntr = (self.unknown_cntr + 1)%100
+                self.unknown_dict.update({val: self.unknown_cntr + self.unknown_base})
+                self.unknown_cntr = (self.unknown_cntr + 1) % 100
                 return self.unknown_dict[val]
 
     def _translate1(self, word_list):
         # Note that GLOVE is using only lower case words, hence we need to lower case the words
         if USE_840:
-          return [self._dictHandleExp(self.wdict, word) for word in word_list]
+            return [self._dictHandleExp(self.wdict, word) for word in word_list]
         else:
-          return [self._dictHandleExp(self.wdict, word.lower()) for word in word_list]          
+            return [self._dictHandleExp(self.wdict, word.lower()) for word in word_list]
 
     def translate(self, word_list):
         first = np.array(self._translate1(word_list))
@@ -206,11 +217,13 @@ class Tagger(nn.Module):
 
         # Creat Embeddings
         vecs = GLOVE_DATA.vectors
-        vecs = vecs/torch.norm(vecs, dim=1, keepdim=True)
-        ## Add to glove vectors 2 vectors for unknown and padding:
+        vecs = vecs / torch.norm(vecs, dim=1, keepdim=True)
+        ## Add to glove vectors 100 vectors for unknown and one for padding:
         for i in range(100):
-            pad = torch.zeros((2, vecs[0].shape[0]))
+            pad = torch.normal(mean=torch.zeros(1, vecs[0].shape[0]), std=0.1)
             vecs = torch.cat((vecs, pad), 0)
+        pad = torch.zeros(1, vecs[0].shape[0])
+        vecs = torch.cat((vecs, pad), 0)
         self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True,
                                                         padding_idx=translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
@@ -220,20 +233,34 @@ class Tagger(nn.Module):
         self.linear = nn.Linear(v_dim, tagset_size)
         self.hidden_dim = projected_dim
         self.f_dim = f_dim
-        
+
         self.F = self.feedForward(self.hidden_dim, f_dim, 0.2)
         self.softmax = nn.Softmax(dim=1)
+
+        self.weights_init()
+
+    def weights_init(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, mean=0, std=0.01)
+                nn.init.constant_(module.bias, 0)
 
     def feedForward(self, i_dim, o_dim, dropout):
         use_dropout = dropout > 0
         layers = []
 
-        layers.append(nn.Linear(i_dim, o_dim))
+        l1 = nn.Linear(i_dim, o_dim)
+        nn.init.normal_(l1.weight, mean=0, std=0.01)
+        nn.init.constant_(l1.bias, 0)
+        layers.append(l1)
         if use_dropout:
             layers.append(nn.Dropout(dropout))
         layers.append(nn.ReLU())
 
-        layers.append(nn.Linear(o_dim, o_dim))
+        l2 = nn.Linear(o_dim, o_dim)
+        nn.init.normal_(l2.weight, mean=0, std=0.01)
+        nn.init.constant_(l2.bias, 0)
+        layers.append(l2)
         if use_dropout:
             layers.append(nn.Dropout(dropout))
         layers.append(nn.ReLU())
@@ -253,8 +280,8 @@ class Tagger(nn.Module):
         batch_size = len(padded_premise_w)
 
         if USE_CUDA:
-          padded_premise_w = torch.from_numpy(padded_premise_w).to(deviceCuda)
-          padded_hyp_w = torch.from_numpy(padded_hyp_w).to(deviceCuda)
+            padded_premise_w = torch.from_numpy(padded_premise_w).to(deviceCuda)
+            padded_hyp_w = torch.from_numpy(padded_hyp_w).to(deviceCuda)
 
         prem_w_e = self.wembeddings(torch.tensor(padded_premise_w).long())
         hyp_w_e = self.wembeddings(torch.tensor(padded_hyp_w).long())
@@ -263,8 +290,8 @@ class Tagger(nn.Module):
         prem_w_e = self.project(prem_w_e)
         hyp_w_e = self.project(hyp_w_e)
 
-        #beta, alpha = self.attention(prem_w_e, hyp_w_e)
-        a = prem_w_e 
+        # beta, alpha = self.attention(prem_w_e, hyp_w_e)
+        a = prem_w_e
         b = hyp_w_e
         fa = self.F(a)
         fb = self.F(b)
@@ -307,13 +334,14 @@ class Tagger(nn.Module):
         y = self.linear(y)
 
         if USE_CUDA:
-          y = y.to(deviceCPU)
+            y = y.to(deviceCPU)
 
         return y
 
     def getLabel(self, data):
         _, prediction_argmax = torch.max(data, 1)
         return prediction_argmax
+
 
 class Run(object):
     def __init__(self, params):
@@ -403,7 +431,7 @@ class Run(object):
         print("done")
 
         if USE_CUDA:
-          tagger.to(deviceCuda)
+            tagger.to(deviceCuda)
 
         print("define loss and optimizer")
         loss_function = nn.CrossEntropyLoss()  # ignore_index=len(lTran.tag_dict))
@@ -424,8 +452,7 @@ class Run(object):
         print("Starting training")
         print("data length = " + str(len(train_dataset)))
 
-
-        #if self.run_dev:
+        # if self.run_dev:
         #    self.runOnDev(tagger, padder)
         for epoch in range(self.num_epochs):
             loss_acc = 0
@@ -462,13 +489,13 @@ class Run(object):
                 loss.backward()
                 optimizer.step()
 
-            #self.runOnDev(tagger, padder)
+            # self.runOnDev(tagger, padder)
             print("missed value = " + str(self.wTran.cntr))
             self.wTran.cntr = 0
             print("total cntr value = " + str(self.wTran.total_cntr))
             self.wTran.total_cntr = 0
             print("epoch: " + str(epoch) + " " + str(loss_acc))
-            print("Train accuracy " + str(correct_cntr/total_cntr))
+            print("Train accuracy " + str(correct_cntr / total_cntr))
 
         if self.save_to_file:
             self._save_model_params(tagger, self.wTran, self.lTran)
@@ -489,25 +516,25 @@ FAVORITE_RUN_PARAMS = {
 }
 
 if __name__ == "__main__":
-    #FOLDER_PATH = "./data/snli_1.0/"
+    # FOLDER_PATH = "./data/snli_1.0/"
     train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
-                     #"sys.argv[1]
-    model_file = 'SOMEMODEL' #sys.argv[2]
-    epochs = 100 #int(sys.argv[3])
-    run_dev = True #sys.argv[4]
+    # "sys.argv[1]
+    model_file = 'SOMEMODEL'  # sys.argv[2]
+    epochs = 100  # int(sys.argv[3])
+    run_dev = True  # sys.argv[4]
     dev_file = FOLDER_PATH + "snli_1.0_dev.jsonl"
 
     RUN_PARAMS = FAVORITE_RUN_PARAMS
     RUN_PARAMS.update({
-                'TRAIN_FILE': train_file,
-                'DEV_FILE' : dev_file,
-                'TEST_FILE': None, #test_file,
-                'TEST_O_FILE': None, #test_o_file,
-                'MODEL_FILE': model_file,
-                'SAVE_TO_FILE': False,
-                'RUN_DEV' : run_dev,
-                'EPOCHS' : epochs,
-                'DROPOUT' : True})
+        'TRAIN_FILE': train_file,
+        'DEV_FILE': dev_file,
+        'TEST_FILE': None,  # test_file,
+        'TEST_O_FILE': None,  # test_o_file,
+        'MODEL_FILE': model_file,
+        'SAVE_TO_FILE': False,
+        'RUN_DEV': run_dev,
+        'EPOCHS': epochs,
+        'DROPOUT': True})
 
     run = Run(RUN_PARAMS)
 
