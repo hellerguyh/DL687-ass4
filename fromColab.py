@@ -93,9 +93,12 @@ class WTranslator(object):
     def __init__(self, init=True):
         if init:
             self.wdict = GLOVE_DATA.token_to_index
+            self.unknown_base = len(self.wdict)
             unknown_idx = len(GLOVE_DATA)
-            self.wdict.update({"UNKNOWN": unknown_idx})
-            self.wpadding_idx = unknown_idx + 1
+            self.unknown_cntr = 0
+            self.unknown_dict = {}
+            #self.wdict.update({"UNKNOWN": unknown_idx})
+            self.wpadding_idx = unknown_idx + 100
             self.cntr = 0
             self.total_cntr = 0
 
@@ -110,11 +113,14 @@ class WTranslator(object):
 
     def _dictHandleExp(self, dic, val):
         try:
-            self.total_cntr += 1
             return dic[val]
         except KeyError:
-            self.cntr += 1
-            return dic['UNKNOWN']
+            try:
+                return self.unknown_dict[val]
+            except KeyError:
+                self.unknown_dict.update({val:self.unknown_cntr + self.unknown_base})
+                self.unknown_cntr = (self.unknown_cntr + 1)%100
+                return self.unknown_dict[val]
 
     def _translate1(self, word_list):
         # Note that GLOVE is using only lower case words, hence we need to lower case the words
@@ -202,8 +208,9 @@ class Tagger(nn.Module):
         vecs = GLOVE_DATA.vectors
         vecs = vecs/torch.norm(vecs, dim=1, keepdim=True)
         ## Add to glove vectors 2 vectors for unknown and padding:
-        pad = torch.zeros((2, vecs[0].shape[0]))
-        vecs = torch.cat((vecs, pad), 0)
+        for i in range(100):
+            pad = torch.zeros((2, vecs[0].shape[0]))
+            vecs = torch.cat((vecs, pad), 0)
         self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True,
                                                         padding_idx=translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
