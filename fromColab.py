@@ -66,8 +66,6 @@ class As4Dataset(Dataset):
                         'label': line['gold_label']
                     })
 
-        # self.word_set = set(word_list)
-        # self.tag_set = set(tag_list)
         self.dataset = dataset
         self.is_test_data = is_test_data
         self.is_train_data = is_train_data
@@ -79,16 +77,10 @@ class As4Dataset(Dataset):
         self.wT = wT
         self.lT = lT
 
-    def toIndexes(self, wT, lT):
-        self.dataset = [{'premise': wT.translate(data['premise']), 'hypothesis': wT.translate(data['hypothesis']),
-                         'label': lT.translate(data['label'])} for data in self.dataset]
-        # self.dataset = [(wT.translate(data[0], self.is_train_data), lT.translate(data[1]) if self.is_test_data==False else None, data[2]) for data in self.dataset]
-
     def __getitem__(self, index):
         data = self.dataset[index]
         return {'premise': self.wT.translate(data['premise']), 'hypothesis': self.wT.translate(data['hypothesis']),
                 'label': self.lT.translate(data['label'])}
-        # return self.dataset[index]
 
 
 '''
@@ -200,76 +192,6 @@ class Padding(object):
         return premise_data, hyp_data, tag_b
 
 
-class MLP(nn.Module):
-    def __init__(self, i_dim, o_dim, dropout=0):
-        super(MLP, self).__init__()
-        use_dropout = dropout > 0
-        self.layers = []
-
-        self.layers.append(nn.Linear(i_dim, o_dim))
-        if use_dropout:
-            self.layers.append(nn.Dropout(dropout))
-        self.layers.append(nn.ReLU())
-
-        self.layers.append(nn.Linear(o_dim, o_dim))
-        if use_dropout:
-            self.layers.append(nn.Dropout(dropout))
-        self.layers.append(nn.ReLU())
-        self.layers = nn.Sequential(*self.layers)
-
-    def forward(self, vec):
-        return self.layers(vec)
-        #r = vec
-        #for layer in self.layers:
-        #    r = layer(r)
-        #return r
-
-    def toCuda(self):
-      for layer in self.layers:
-        layer.to(deviceCuda)
-
-
-class Attention(nn.Module):
-    def __init__(self, hidden_dim, f_dim):
-        super(Attention, self).__init__()
-        self.F = MLP(hidden_dim, f_dim, 0.2)
-        self.softmax = nn.Softmax(dim=1)
-
-    def toCuda(self):
-      print("changign F to CUDA")
-      self.F.to(deviceCuda)
-      self.F.toCuda()
-
-    def forward(self, a, b):
-        # a is of shape batch x sentence_a x hidden_dim
-        # b is of shape batch x sentence_b x hidden_dim
-        batch_size = a.shape[0]
-        fa = self.F(a)
-        fb = self.F(b)
-
-        # We want to calculate e_ij = fa_i * fb_j
-        # fa shape: batch x sentence_a x hidden_dim
-        # fb shape: batch x sentence_b x hidden_dim
-        ## Per batch calculation:
-        ## calc fa x fb.transpose() gives sentence_a x sentence_b
-        E = torch.bmm(fa, torch.transpose(fb, 1, 2))
-
-        # E shape: batch x sentence_a x sentence_b
-        ## for beta needs: (batch*sentence_a)*sentence_b
-        E4beta = self.softmax(E.view(-1, b.shape[1]))
-        E4beta = E4beta.view(E.shape)
-        beta = torch.bmm(E4beta, b)
-
-        E4alpha = torch.transpose(E, 1, 2)
-        saved_shape = E4alpha.shape
-        E4alpha = self.softmax(E4alpha.reshape(-1, a.shape[1]))
-        # alpha is (batch*sentence_b) x sentence a
-        E4alpha = E4alpha.view(saved_shape)
-        alpha = torch.bmm(E4alpha, a)
-
-        return beta, alpha
-
-
 class Tagger(nn.Module):
     def __init__(self, embedding_dim, projected_dim, tagset_size,
                  translator, f_dim=200, v_dim=200, dropout=False):
@@ -286,7 +208,6 @@ class Tagger(nn.Module):
                                                         padding_idx=translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
         self.project = nn.Linear(embedding_dim, projected_dim)
-        #self.attention = Attention(hidden_dim=projected_dim, f_dim=f_dim)
         self.G = self.feedForward(f_dim * 2, v_dim, 0.2)
         self.H = self.feedForward(v_dim * 2, v_dim, 0.2)
         self.linear = nn.Linear(v_dim, tagset_size)
@@ -312,15 +233,6 @@ class Tagger(nn.Module):
 
         layers = nn.Sequential(*layers)
         return layers
-
-    def toCuda(self):
-      pass
-      #self.G.to(deviceCuda)
-      #self.G.toCuda()
-      #self.H.to(deviceCuda)
-      #self.H.toCuda()
-      #self.attention.to(deviceCuda)
-      #self.attention.toCuda()
 
     def forward(self, premise_data, hyp_data):
         premise_data, hyp_data
@@ -432,7 +344,6 @@ class Run(object):
     def runOnDev(self, tagger, padder):
         tagger.eval()
         dev_dataset = As4Dataset(self.dev_file)
-        # dev_dataset.toIndexes(wT = self.wTran, lT = self.lTran)
 
         dev_dataset.setTranslators(wT=self.wTran, lT=self.lTran)
 
@@ -475,7 +386,6 @@ class Run(object):
         self.lTran = TagTranslator()
 
         print("translate to indexes")
-        # train_dataset.toIndexes(wT = self.wTran, lT = self.lTran)
         train_dataset.setTranslators(wT=self.wTran, lT=self.lTran)
         print("done")
 
@@ -487,7 +397,6 @@ class Run(object):
 
         if USE_CUDA:
           tagger.to(deviceCuda)
-          tagger.toCuda()
 
         print("define loss and optimizer")
         loss_function = nn.CrossEntropyLoss()  # ignore_index=len(lTran.tag_dict))
