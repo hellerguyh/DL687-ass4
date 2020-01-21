@@ -60,9 +60,13 @@ class As4Dataset(Dataset):
                 line = json.loads(line)
                 if (line['gold_label'] == 'entailment') or (line['gold_label'] == 'contradiction') or (
                         line['gold_label'] == 'neutral'):
+                    prm = line['sentence1'].split()
+                    prm.insert(0, 'NULL')
+                    hyp = line['sentence2'].split()
+                    hyp.insert(0, 'NULL')
                     dataset.append({
-                        'premise': line['sentence1'].split(),
-                        'hypothesis': line['sentence2'].split(),
+                        'premise': prm,
+                        'hypothesis': hyp,
                         'label': line['gold_label']
                     })
 
@@ -209,8 +213,11 @@ class Tagger(nn.Module):
         vecs = vecs/torch.norm(vecs, dim=1, keepdim=True)
         ## Add to glove vectors 2 vectors for unknown and padding:
         for i in range(100):
-            pad = torch.zeros((2, vecs[0].shape[0]))
+            #pad = torch.rand((1, vecs[0].shape[0]))
+            pad = torch.normal(mean=torch.zeros(1, vecs[0].shape[0]), std=1)
             vecs = torch.cat((vecs, pad), 0)
+        pad = torch.zeros((1, vecs[0].shape[0]))
+        vecs = torch.cat((vecs, pad), 0)
         self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True,
                                                         padding_idx=translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
@@ -409,6 +416,7 @@ class Run(object):
         loss_function = nn.CrossEntropyLoss()  # ignore_index=len(lTran.tag_dict))
         optimizer = torch.optim.Adagrad(tagger.parameters(), lr=self.learning_rate,
                                         initial_accumulator_value=0.1)  # 0.01)
+        #optimizer = torch.optim.Adadelta(tagger.parameters(), lr=self.learning_rate)
         print("done")
 
         print("init padder")
@@ -462,7 +470,7 @@ class Run(object):
                 loss.backward()
                 optimizer.step()
 
-            #self.runOnDev(tagger, padder)
+            self.runOnDev(tagger, padder)
             print("missed value = " + str(self.wTran.cntr))
             self.wTran.cntr = 0
             print("total cntr value = " + str(self.wTran.total_cntr))
@@ -483,8 +491,7 @@ class Run(object):
 FAVORITE_RUN_PARAMS = {
     'EMBEDDING_DIM': 300,
     'RNN_H_DIM': 200,
-    'EPOCHS': 20,
-    'BATCH_SIZE': 100,
+    'BATCH_SIZE': 4,
     'LEARNING_RATE': 0.05
 }
 
@@ -493,7 +500,7 @@ if __name__ == "__main__":
     train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
                      #"sys.argv[1]
     model_file = 'SOMEMODEL' #sys.argv[2]
-    epochs = 100 #int(sys.argv[3])
+    epochs = 200 #int(sys.argv[3])
     run_dev = True #sys.argv[4]
     dev_file = FOLDER_PATH + "snli_1.0_dev.jsonl"
 
