@@ -5,6 +5,7 @@ import numpy as np
 import random as r
 from torchnlp.word_to_vector import GloVe
 import json
+from spacy.lang.en import English
 
 import sys
 
@@ -64,10 +65,8 @@ class As4Dataset(Dataset):
                 line = json.loads(line)
                 if (line['gold_label'] == 'entailment') or (line['gold_label'] == 'contradiction') or (
                         line['gold_label'] == 'neutral'):
-                    prm = line['sentence1'].split()
-                    prm.insert(0, 'NULL')
-                    hyp = line['sentence2'].split()
-                    hyp.insert(0, 'NULL')
+                    prm = 'NULL ' + line['sentence1']
+                    hyp = 'NULL ' + line['sentence2']
                     dataset.append({
                         'premise': prm,
                         'hypothesis': hyp,
@@ -109,6 +108,7 @@ class WTranslator(object):
             self.wpadding_idx = unknown_idx + 100
             self.cntr = 0
             self.total_cntr = 0
+            self.tokenizer = English()
 
     def getPaddingIndex(self):
         return {'w': self.wpadding_idx}
@@ -132,10 +132,15 @@ class WTranslator(object):
 
     def _translate1(self, word_list):
         # Note that GLOVE is using only lower case words, hence we need to lower case the words
+        print(word_list)
+        tokens = self.tokenizer(word_list)
+        word_list_t = [token for token in tokens]
+        print(word_list_t)
+        raise Exception()
         if USE_840:
-          return [self._dictHandleExp(self.wdict, word) for word in word_list]
+          return [self._dictHandleExp(self.wdict, word) for word in word_list_t]
         else:
-          return [self._dictHandleExp(self.wdict, word.lower()) for word in word_list]          
+          return [self._dictHandleExp(self.wdict, word.lower()) for word in word_list_t]          
 
     def translate(self, word_list):
         first = np.array(self._translate1(word_list))
@@ -554,7 +559,7 @@ FAVORITE_RUN_PARAMS = {
 
 if __name__ == "__main__":
     #FOLDER_PATH = "./data/snli_1.0/"
-    train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
+    train_file = FOLDER_PATH + "small_dataset.jsonl" #snli_1.0_train.jsonl"
                      #"sys.argv[1]
     model_file = FOLDER_PATH + 'SOMEMODEL' #sys.argv[2]
     epochs = 100 #int(sys.argv[3])
