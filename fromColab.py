@@ -18,8 +18,12 @@ def DEBUG_PRINT(x):
 
 deviceCuda = torch.device("cuda")
 deviceCPU = torch.device("cpu")
-USE_CUDA = True
+USE_CUDA = False
 USE_840 = True
+RUNNING_LOCAL = True
+if RUNNING_LOCAL:
+    FOLDER_PATH = './data/snli_1.0/'
+    USE_CUDA = False
 if USE_840:
   GLOVE_DATA = GloVe(name='840B', dim=300, cache=FOLDER_PATH+'glove_cache/')
 else:
@@ -338,6 +342,48 @@ class Run(object):
         self.learning_rate = params['LEARNING_RATE']
         self.dropout = params['DROPOUT']
         self.acc_data_list = []
+        self.load_params = params['LOAD_PARAMS']
+
+    def _save_model_params(self, tagger, wT, lT, optimizer):
+        try:
+            params = torch.load(self.model_file)
+        except FileNotFoundError:
+            print("No model params file found - creating new model params")
+            params = {}
+
+        flavor_params = {}
+        flavor_params.update({'tagger' : tagger.state_dict()})
+        flavor_params.update({'wT' : wT.saveParams()})
+        flavor_params.update({'lT' : lT.saveParams()})
+        flavor_params.update({'optimizer': optimizer.state_dict()})
+        params.update({'model_params' : flavor_params})
+        torch.save(params, self.model_file)
+
+    def _load_opt_params(self, opt):
+        params = torch.load(self.model_file)
+        flavor_params = params['model_params']
+        opt.load_state_dict(flavor_params['optimizer'])
+
+    def _load_translators_params(self, wT, lT):
+        params = torch.load(self.model_file)
+        flavor_params = params['model_params']
+        wT.loadParams(flavor_params['wT'])
+        lT.loadParams(flavor_params['lT'])
+
+    def _load_tagger_params(self, tagger):
+        params = torch.load(self.model_file)
+        flavor_params = params['model_params']
+        tagger.load_state_dict(flavor_params['tagger'])
+
+    def _saveAccData(self):
+        try:
+            acc_data = torch.load(FOLDER_PATH + 'accuracy_graphs_data')
+        except FileNotFoundError:
+            print("No accuracy data file found - creating new")
+            acc_data = {}
+
+        acc_data.update({'accuracy': self.acc_data_list})
+        torch.save(acc_data, FOLDER_PATH + 'accuracy_graphs_data')
 
     def _calc_batch_acc(self, tagger, flatten_tag, flatten_label):
         predicted_tags = tagger.getLabel(flatten_tag)
@@ -399,6 +445,9 @@ class Run(object):
         self.wTran = WTranslator()
         self.lTran = TagTranslator()
 
+        if self.load_params:
+            self._load_translators_params(self.wTran, self.lTran)
+
         print("translate to indexes")
         train_dataset.setTranslators(wT=self.wTran, lT=self.lTran)
         print("done")
@@ -407,6 +456,10 @@ class Run(object):
         tagger = Tagger(embedding_dim=self.edim, projected_dim=self.rnn_h_dim,
                         translator=self.wTran, tagset_size=self.lTran.getLengths()['tag'],  # + 1,
                         dropout=self.dropout)
+
+        if self.load_params:
+            print("loading model params")
+            self._load_tagger_params(tagger)
         print("done")
 
         if USE_CUDA:
@@ -416,6 +469,8 @@ class Run(object):
         loss_function = nn.CrossEntropyLoss()  # ignore_index=len(lTran.tag_dict))
         optimizer = torch.optim.Adagrad(tagger.parameters(), lr=self.learning_rate,
                                         initial_accumulator_value=0.1)  # 0.01)
+        if self.load_params:
+            self._load_opt_params(optimizer)
         #optimizer = torch.optim.Adadelta(tagger.parameters(), lr=self.learning_rate)
         print("done")
 
@@ -433,8 +488,8 @@ class Run(object):
         print("data length = " + str(len(train_dataset)))
 
 
-        #if self.run_dev:
-        #    self.runOnDev(tagger, padder)
+        if self.run_dev:
+            self.runOnDev(tagger, padder)
         for epoch in range(self.num_epochs):
             loss_acc = 0
             progress1 = 0
@@ -470,7 +525,8 @@ class Run(object):
                 loss.backward()
                 optimizer.step()
 
-            self.runOnDev(tagger, padder)
+            if self.run_dev:
+                self.runOnDev(tagger, padder)
             print("missed value = " + str(self.wTran.cntr))
             self.wTran.cntr = 0
             print("total cntr value = " + str(self.wTran.total_cntr))
@@ -478,8 +534,9 @@ class Run(object):
             print("epoch: " + str(epoch) + " " + str(loss_acc))
             print("Train accuracy " + str(correct_cntr/total_cntr))
 
-        if self.save_to_file:
-            self._save_model_params(tagger, self.wTran, self.lTran)
+            if self.save_to_file:
+                print("saving model params")
+                self._save_model_params(tagger, self.wTran, self.lTran, optimizer)
 
         if self.run_dev:
             self._saveAccData()
@@ -491,7 +548,7 @@ class Run(object):
 FAVORITE_RUN_PARAMS = {
     'EMBEDDING_DIM': 300,
     'RNN_H_DIM': 200,
-    'BATCH_SIZE': 4,
+    'BATCH_SIZE': 100,
     'LEARNING_RATE': 0.05
 }
 
@@ -499,8 +556,8 @@ if __name__ == "__main__":
     #FOLDER_PATH = "./data/snli_1.0/"
     train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
                      #"sys.argv[1]
-    model_file = 'SOMEMODEL' #sys.argv[2]
-    epochs = 200 #int(sys.argv[3])
+    model_file = FOLDER_PATH + 'SOMEMODEL' #sys.argv[2]
+    epochs = 100 #int(sys.argv[3])
     run_dev = True #sys.argv[4]
     dev_file = FOLDER_PATH + "snli_1.0_dev.jsonl"
 
@@ -511,9 +568,10 @@ if __name__ == "__main__":
                 'TEST_FILE': None, #test_file,
                 'TEST_O_FILE': None, #test_o_file,
                 'MODEL_FILE': model_file,
-                'SAVE_TO_FILE': False,
+                'SAVE_TO_FILE': True,
                 'RUN_DEV' : run_dev,
                 'EPOCHS' : epochs,
+                'LOAD_PARAMS': True,
                 'DROPOUT' : True})
 
     run = Run(RUN_PARAMS)
