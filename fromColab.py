@@ -18,13 +18,14 @@ def DEBUG_PRINT(x):
 
 deviceCuda = torch.device("cuda")
 deviceCPU = torch.device("cpu")
-USE_CUDA = False
+USE_CUDA = True
 USE_840 = True
-RUNNING_LOCAL = True
+RUNNING_LOCAL = False
 if RUNNING_LOCAL:
     FOLDER_PATH = './data/snli_1.0/'
     USE_CUDA = False
 if USE_840:
+  print(FOLDER_PATH+'glove_cache')
   GLOVE_DATA = GloVe(name='840B', dim=300, cache=FOLDER_PATH+'glove_cache/')
 else:
   GLOVE_DATA = GloVe(name='6B', dim=300, cache=FOLDER_PATH+'glove_cache/')
@@ -344,46 +345,46 @@ class Run(object):
         self.acc_data_list = []
         self.load_params = params['LOAD_PARAMS']
 
-    def _save_model_params(self, tagger, wT, lT, optimizer):
-        try:
-            params = torch.load(self.model_file)
-        except FileNotFoundError:
-            print("No model params file found - creating new model params")
-            params = {}
-
-        flavor_params = {}
-        flavor_params.update({'tagger' : tagger.state_dict()})
-        flavor_params.update({'wT' : wT.saveParams()})
-        flavor_params.update({'lT' : lT.saveParams()})
-        flavor_params.update({'optimizer': optimizer.state_dict()})
-        params.update({'model_params' : flavor_params})
-        torch.save(params, self.model_file)
+    def _save_model_params(self, tagger, wT, lT, optimizer, epoch):
+        params = {'tagger' : tagger.state_dict()}
+        torch.save(params, self.model_file + "_tagger")
+        params = {'wT':wT.saveParams(), 'lT':lT.saveParams()}
+        torch.save(params, self.model_file + "_trans")
+        params = {'opt':optimizer.state_dict()}
+        torch.save(params, self.model_file + "_opt")
+        #params = {'epoch':epoch}
+        #torch.save(params, self.model_file + "_epoch")
 
     def _load_opt_params(self, opt):
-        params = torch.load(self.model_file)
-        flavor_params = params['model_params']
-        opt.load_state_dict(flavor_params['optimizer'])
+        params = torch.load(self.model_file + "_opt")
+        opt.load_state_dict(params['opt'])
 
     def _load_translators_params(self, wT, lT):
-        params = torch.load(self.model_file)
-        flavor_params = params['model_params']
-        wT.loadParams(flavor_params['wT'])
-        lT.loadParams(flavor_params['lT'])
+        params = torch.load(self.model_file + "_trans")
+        wT.loadParams(params['wT'])
+        lT.loadParams(params['lT'])
 
     def _load_tagger_params(self, tagger):
-        params = torch.load(self.model_file)
-        flavor_params = params['model_params']
-        tagger.load_state_dict(flavor_params['tagger'])
+        params = torch.load(self.model_file + "_tagger")
+        tagger.load_state_dict(params['tagger'])
 
-    def _saveAccData(self):
+    def _load_epoch(self):
+        params = torch.load(self.model_file + "_epoch")
+        return params['epoch']
+
+    def _saveAccData(self, epoch):
         try:
             acc_data = torch.load(FOLDER_PATH + 'accuracy_graphs_data')
         except FileNotFoundError:
             print("No accuracy data file found - creating new")
             acc_data = {}
 
-        acc_data.update({'accuracy': self.acc_data_list})
+        acc_data.update({str(epoch): (self.acc_data_list[-1], self.train_accuracy,
+                                      self.train_loss)})
+        acc_data.update({'epoch':epoch})
         torch.save(acc_data, FOLDER_PATH + 'accuracy_graphs_data')
+        params = {'epoch':epoch}
+        torch.save(params, self.model_file + "_epoch")
 
     def _calc_batch_acc(self, tagger, flatten_tag, flatten_label):
         predicted_tags = tagger.getLabel(flatten_tag)
@@ -444,6 +445,11 @@ class Run(object):
 
         self.wTran = WTranslator()
         self.lTran = TagTranslator()
+
+        if self.load_params:
+          epoch_base = int(self._load_epoch())
+        else:
+          epoch_base = 0
 
         if self.load_params:
             self._load_translators_params(self.wTran, self.lTran)
@@ -524,6 +530,8 @@ class Run(object):
                 loss_acc += loss.item()
                 loss.backward()
                 optimizer.step()
+                
+                tagger.zero_grad()
 
             if self.run_dev:
                 self.runOnDev(tagger, padder)
@@ -532,14 +540,19 @@ class Run(object):
             print("total cntr value = " + str(self.wTran.total_cntr))
             self.wTran.total_cntr = 0
             print("epoch: " + str(epoch) + " " + str(loss_acc))
+            self.train_accuracy = correct_cntr/total_cntr
+            self.train_loss = loss_acc
             print("Train accuracy " + str(correct_cntr/total_cntr))
 
             if self.save_to_file:
+              if (epoch % 5) == 4:
                 print("saving model params")
-                self._save_model_params(tagger, self.wTran, self.lTran, optimizer)
+                self._save_model_params(tagger, self.wTran, self.lTran, optimizer,
+                                        epoch_base + epoch)
+                print("done saving model params")
 
-        if self.run_dev:
-            self._saveAccData()
+            if self.run_dev:
+              self._saveAccData(epoch_base + epoch)
         # if (sys.argv[1] == 'save') or (sys.argv[1] == 'loadsave'):
         # self._save_model_params(tagger, self.wTran, self.lTran)
         # torch.save(tagger.state_dict(), 'bilstm_params.pt')
@@ -548,7 +561,7 @@ class Run(object):
 FAVORITE_RUN_PARAMS = {
     'EMBEDDING_DIM': 300,
     'RNN_H_DIM': 200,
-    'BATCH_SIZE': 100,
+    'BATCH_SIZE': 32,
     'LEARNING_RATE': 0.05
 }
 
@@ -556,8 +569,8 @@ if __name__ == "__main__":
     #FOLDER_PATH = "./data/snli_1.0/"
     train_file = FOLDER_PATH + "snli_1.0_train.jsonl"
                      #"sys.argv[1]
-    model_file = FOLDER_PATH + 'SOMEMODEL' #sys.argv[2]
-    epochs = 100 #int(sys.argv[3])
+    model_file = FOLDER_PATH + '32Bbatch' #sys.argv[2]
+    epochs = 50 #int(sys.argv[3])
     run_dev = True #sys.argv[4]
     dev_file = FOLDER_PATH + "snli_1.0_dev.jsonl"
 
