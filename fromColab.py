@@ -3,9 +3,24 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import random as r
-from torchnlp.word_to_vector import GloVe
+#from torchnlp.word_to_vector import GloVe
 import json
 from spacy.lang.en import English
+
+from torchtext import data
+from torchtext import datasets
+from torchtext.vocab import GloVe
+#from torchnlp.word_to_vector import GloVe
+
+import spacy
+
+spacy.load('en')
+
+
+
+
+
+
 
 import sys
 
@@ -20,195 +35,65 @@ def DEBUG_PRINT(x):
 deviceCuda = torch.device("cuda")
 deviceCPU = torch.device("cpu")
 USE_CUDA = False
-USE_840 = True
+USE_840 = False #True
 RUNNING_LOCAL = True
 if RUNNING_LOCAL:
     FOLDER_PATH = './data/snli_1.0/'
     USE_CUDA = False
-if USE_840:
-  GLOVE_DATA = GloVe(name='840B', dim=300, cache=FOLDER_PATH+'glove_cache/')
+
+
+
+#if torch.cuda.is_available():
+if USE_CUDA:
+    torch.cuda.set_device(0)
+    device = torch.device('cuda:{}'.format(0))
 else:
-  GLOVE_DATA = GloVe(name='6B', dim=300, cache=FOLDER_PATH+'glove_cache/')
+    device = torch.device('cpu')
 
 
-def list2dict(lst):
-    it = iter(lst)
-    indexes = range(len(lst))
-    res_dct = dict(zip(it, indexes))
-    return res_dct
+# set up fields
+TEXT = data.Field(lower=True, batch_first=True, tokenize='spacy', tokenizer_language='en') #include_lengths=True, tokenize='spacy', tokenizer_language='en')
+LABEL = data.Field(sequential=False)
+
+# make splits for data
+train, dev, test = datasets.SNLI.splits(TEXT, LABEL)
+
+# build the vocabulary
+if USE_840:
+  TEXT.build_vocab(train, vectors=GloVe(name='840B', dim=100, cache="./glove_cache/"))
+else:
+  TEXT.build_vocab(train, vectors=GloVe(name='6B', dim=100, cache="./glove_cache/"))
+
+LABEL.build_vocab(train)
+
+# make iterator for splits
+train_iter, dev_iter, test_iter = data.BucketIterator.splits((train, dev, test), batch_size=4, device=device)
 
 
-def reverseDict(d):
-    vals = [''] * len(d.keys())
-    for k in d.keys():
-        vals[d[k]] = k
-    return vals
+class BatchWrapper:
+    def __init__(self, dl, x1_var, x2_var, y_vars):
+        self.dl, self.x1_var, self.x2_var, self.y_vars = dl, x1_var, x2_var, y_vars  # we pass in the list of attributes for x
 
+    def __iter__(self):
+        for batch in self.dl:
+            x1 = getattr(batch, self.x1_var)
+            x2 = getattr(batch, self.x2_var)
 
-''' Seems like gloves works on words! not indexes!!!! '''
+            if self.y_vars is not None:  # we will concatenate y into a single tensor
+                #print(getattr(batch, self.y_vars))
+                y = torch.Tensor(getattr(batch, self.y_vars).float())#y = torch.cat([getattr(batch, feat).unsqueeze(1) for feat in self.y_vars], dim=1).float()
+            else:
+                y = torch.zeros((1))
 
-
-class As4Dataset(Dataset):
-    def __init__(self, file_path, is_test_data=False, is_train_data=True):
-
-        self.file_path = file_path
-
-        dataset = []
-        sample_w = []
-        sample_t = []
-        word_list = []
-        tag_list = []
-
-        with open(file_path, "r") as df:
-            for line in df:
-                line = line.strip()
-                line = json.loads(line)
-                if (line['gold_label'] == 'entailment') or (line['gold_label'] == 'contradiction') or (
-                        line['gold_label'] == 'neutral'):
-                    prm = 'NULL ' + line['sentence1']
-                    hyp = 'NULL ' + line['sentence2']
-                    dataset.append({
-                        'premise': prm,
-                        'hypothesis': hyp,
-                        'label': line['gold_label']
-                    })
-
-        self.dataset = dataset
-        self.is_test_data = is_test_data
-        self.is_train_data = is_train_data
+            yield (x1, x2, y)
 
     def __len__(self):
-        return len(self.dataset)
-
-    def setTranslators(self, wT, lT):
-        self.wT = wT
-        self.lT = lT
-
-    def __getitem__(self, index):
-        data = self.dataset[index]
-        return {'premise': self.wT.translate(data['premise']), 'hypothesis': self.wT.translate(data['hypothesis']),
-                'label': self.lT.translate(data['label'])}
+        return len(self.dl)
 
 
-'''
-Translates word represented as strings to indexes at the embedding table
-should be init=True at train dataset and init=False on test/dev dataset
-'''
-
-
-class WTranslator(object):
-    def __init__(self, init=True):
-        if init:
-            self.wdict = GLOVE_DATA.token_to_index
-            self.unknown_base = len(self.wdict)
-            unknown_idx = len(GLOVE_DATA)
-            self.unknown_cntr = 0
-            self.unknown_dict = {}
-            #self.wdict.update({"UNKNOWN": unknown_idx})
-            self.wpadding_idx = unknown_idx + 100
-            self.cntr = 0
-            self.total_cntr = 0
-            self.tokenizer = English()
-
-    def getPaddingIndex(self):
-        return {'w': self.wpadding_idx}
-
-    def saveParams(self):
-        return {'wdict': self.wdict}
-
-    def loadParams(self, params):
-        self.wdict = params['wdict']
-
-    def _dictHandleExp(self, dic, val):
-        try:
-            return dic[val]
-        except KeyError:
-            try:
-                return self.unknown_dict[val]
-            except KeyError:
-                self.unknown_dict.update({val:self.unknown_cntr + self.unknown_base})
-                self.unknown_cntr = (self.unknown_cntr + 1)%100
-                return self.unknown_dict[val]
-
-    def _translate1(self, word_list):
-        # Note that GLOVE is using only lower case words, hence we need to lower case the words
-        print(word_list)
-        tokens = self.tokenizer(word_list)
-        word_list_t = [token for token in tokens]
-        print(word_list_t)
-        raise Exception()
-        if USE_840:
-          return [self._dictHandleExp(self.wdict, word) for word in word_list_t]
-        else:
-          return [self._dictHandleExp(self.wdict, word.lower()) for word in word_list_t]          
-
-    def translate(self, word_list):
-        first = np.array(self._translate1(word_list))
-        return {'word': first}
-
-    def getLengths(self):
-        return {'word': len(self.wdict)}
-
-
-class TagTranslator(object):
-    def __init__(self, init=True):
-        if init:
-            tagset = ['entailment', 'contradiction', 'neutral']
-            self.tag_dict = list2dict(tagset)
-
-    def translate(self, tag):
-        return self.tag_dict[tag]
-
-    def getLengths(self):
-        return {'tag': len(self.tag_dict)}
-
-    def getPaddingIdx(self):
-        return {'tag': len(self.tag_dict)}
-
-    def saveParams(self):
-        return {'tag': self.tag_dict}
-
-    def loadParams(self, params):
-        self.tag_dict = params['tag']
-
-
-''' Padds a batch of examples so all will be at the same length 
-    Returns also the original lengths of the hypothesis and premise 
-
-    Note: data is padded with "pad_index" - an index cordinated with the
-    embedding layer to be a padding index and hence output zeros.
-'''
-
-
-class Padding(object):
-    def __init__(self, wT, lT):
-        self.wT = wT
-        self.lT = lT
-        self.wPadIndex = self.wT.getPaddingIndex()['w']
-
-    def padData(self, data_b, len_b, max_l, padIndex):
-        batch_size = len(len_b)
-        padded_data = np.ones((batch_size, max_l)) * padIndex
-        for i, data in enumerate(data_b):
-            padded_data[i][:len_b[i]] = data  # first embeddings
-        return padded_data.astype(int)
-
-    def collate_fn(self, data):
-        # data.sort(key=lambda x: x[2], reverse=True)
-
-        tag_b = [d['label'] for d in data]
-
-        premise_w_lens = [len(d['premise']['word']) for d in data]
-        data_premise = [d['premise']['word'] for d in data]
-        padded_premise_w = self.padData(data_premise, premise_w_lens, max(premise_w_lens), self.wPadIndex)
-
-        hyp_w_lens = [len(d['hypothesis']['word']) for d in data]
-        data_hyp = [d['hypothesis']['word'] for d in data]
-        padded_hyp_w = self.padData(data_hyp, hyp_w_lens, max(hyp_w_lens), self.wPadIndex)
-
-        premise_data = {'w_data': padded_premise_w, 'w_lens': premise_w_lens}
-        hyp_data = {'w_data': padded_hyp_w, 'w_lens': hyp_w_lens}
-        return premise_data, hyp_data, tag_b
+train_dl = BatchWrapper(train_iter, "premise", "hypothesis", "label")
+dev_dl = BatchWrapper(dev_iter, "premise", "hypothesis", "label")
+test_dl = BatchWrapper(test_iter, "premise", "hypothesis", "label")
 
 
 class Tagger(nn.Module):
@@ -217,18 +102,23 @@ class Tagger(nn.Module):
         super(Tagger, self).__init__()
         self.embedding_dim = embedding_dim
 
-        # Creat Embeddings
-        vecs = GLOVE_DATA.vectors
-        vecs = vecs/torch.norm(vecs, dim=1, keepdim=True)
-        ## Add to glove vectors 2 vectors for unknown and padding:
-        for i in range(100):
-            #pad = torch.rand((1, vecs[0].shape[0]))
-            pad = torch.normal(mean=torch.zeros(1, vecs[0].shape[0]), std=1)
-            vecs = torch.cat((vecs, pad), 0)
-        pad = torch.zeros((1, vecs[0].shape[0]))
-        vecs = torch.cat((vecs, pad), 0)
-        self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True,
-                                                        padding_idx=translator.getPaddingIndex()['w'])
+        # # Creat Embeddings
+        # vecs = GLOVE_DATA.vectors
+        # vecs = vecs/torch.norm(vecs, dim=1, keepdim=True)
+        # ## Add to glove vectors 2 vectors for unknown and padding:
+        # for i in range(100):
+        #     #pad = torch.rand((1, vecs[0].shape[0]))
+        #     pad = torch.normal(mean=torch.zeros(1, vecs[0].shape[0]), std=1)
+        #     vecs = torch.cat((vecs, pad), 0)
+        # pad = torch.zeros((1, vecs[0].shape[0]))
+        # vecs = torch.cat((vecs, pad), 0)
+
+        vocab = TEXT.vocab
+        self.wembeddings = nn.Embedding(len(vocab), self.embedding_dim)
+        self.wembeddings.weight.data.copy_(vocab.vectors)
+
+        # self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True,
+        #                                                 padding_idx=translator.getPaddingIndex()['w'])
         ## project down the vectors to 200dim
         self.project = nn.Linear(embedding_dim, projected_dim)
         self.G = self.feedForward(f_dim * 2, v_dim, 0.2)
@@ -260,11 +150,11 @@ class Tagger(nn.Module):
     def forward(self, premise_data, hyp_data):
         premise_data, hyp_data
 
-        padded_premise_w = premise_data['w_data']
-        premise_w_lens = premise_data['w_lens']
+        padded_premise_w = premise_data#['w_data']
+        #premise_w_lens = premise_data['w_lens']
 
-        padded_hyp_w = hyp_data['w_data']
-        hyp_w_lens = hyp_data['w_lens']
+        padded_hyp_w = hyp_data#4['w_data']
+        #hyp_w_lens = hyp_data['w_lens']
 
         batch_size = len(padded_premise_w)
 
@@ -330,6 +220,10 @@ class Tagger(nn.Module):
     def getLabel(self, data):
         _, prediction_argmax = torch.max(data, 1)
         return prediction_argmax
+
+
+
+import tqdm
 
 class Run(object):
     def __init__(self, params):
@@ -401,24 +295,17 @@ class Run(object):
         # print(batch_tag_score.shape)
         # print(batch_label_list)
         flatten_tag = batch_tag_score  # .reshape(-1, batch_tag_score.shape[2])
-        flatten_label = torch.LongTensor(batch_label_list)  # .reshape(-1))
+        flatten_label = batch_label_list.long() #torch.LongTensor(batch_label_list)  # .reshape(-1))
         # print(flatten_tag)
         # print(flatten_label)
         return flatten_tag, flatten_label
 
-    def runOnDev(self, tagger, padder):
+    def runOnDev(self, tagger):
         tagger.eval()
-        dev_dataset = As4Dataset(self.dev_file)
-
-        dev_dataset.setTranslators(wT=self.wTran, lT=self.lTran)
-
-        dev_dataloader = DataLoader(dataset=dev_dataset,
-                                    batch_size=self.batch_size, shuffle=False,
-                                    collate_fn=padder.collate_fn)
         with torch.no_grad():
             correct_cntr = 0
             total_cntr = 0
-            for sample in dev_dataloader:
+            for sample in tqdm.tqdm(dev_dl):
                 # batch_data_list, batch_label_list, batch_len_list, padded_sublens = sample
                 premise_data, hyp_data, batch_label_list = sample
 
@@ -444,22 +331,15 @@ class Run(object):
 
     def train(self):
         print("Loading data")
-        train_dataset = As4Dataset(self.train_file, is_test_data=False, is_train_data=True)
+
         print("Done loading data")
 
-        self.wTran = WTranslator()
-        self.lTran = TagTranslator()
 
-        if self.load_params:
-            self._load_translators_params(self.wTran, self.lTran)
 
-        print("translate to indexes")
-        train_dataset.setTranslators(wT=self.wTran, lT=self.lTran)
-        print("done")
 
         print("init tagger")
         tagger = Tagger(embedding_dim=self.edim, projected_dim=self.rnn_h_dim,
-                        translator=self.wTran, tagset_size=self.lTran.getLengths()['tag'],  # + 1,
+                        translator=None, tagset_size=len(LABEL.vocab),  # + 1,
                         dropout=self.dropout)
 
         if self.load_params:
@@ -479,22 +359,10 @@ class Run(object):
         #optimizer = torch.optim.Adadelta(tagger.parameters(), lr=self.learning_rate)
         print("done")
 
-        print("init padder")
-        padder = Padding(self.wTran, self.lTran)
-        print("done")
-
-        # print(self.wTran)
-
-        train_dataloader = DataLoader(dataset=train_dataset,
-                                      batch_size=self.batch_size, shuffle=True,
-                                      collate_fn=padder.collate_fn)
-
-        print("Starting training")
-        print("data length = " + str(len(train_dataset)))
 
 
         if self.run_dev:
-            self.runOnDev(tagger, padder)
+            self.runOnDev(tagger)
         for epoch in range(self.num_epochs):
             loss_acc = 0
             progress1 = 0
@@ -502,7 +370,7 @@ class Run(object):
             correct_cntr = 0
             total_cntr = 0
             sentences_seen = 0
-            for sample in train_dataloader:
+            for sample in tqdm.tqdm(train_dl):
                 if progress1 / 100000 > progress2:
                     print("reached " + str(progress2 * 100000))
                     progress2 += 1
@@ -515,27 +383,27 @@ class Run(object):
                 premise_data, hyp_data, batch_label_list = sample
                 batch_tag_score = tagger.forward(premise_data, hyp_data)
 
-                # flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
+                #flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
 
                 # calc accuracy
                 # c, t = self._calc_batch_acc(tagger, flatten_tag, flatten_label)
-                batch_label_tensor = torch.LongTensor(batch_label_list)
+                batch_label_tensor = batch_label_list.long() #torch.LongTensor(batch_label_list)
                 c, t = self._calc_batch_acc(tagger, batch_tag_score, batch_label_tensor)
                 correct_cntr += c
                 total_cntr += t
 
-                # loss = loss_function(flatten_tag, flatten_label)
+                # print(flatten_tag)
+                # print(flatten_label)
+                #loss = loss_function(flatten_tag, flatten_label)
+
                 loss = loss_function(batch_tag_score, batch_label_tensor)
                 loss_acc += loss.item()
                 loss.backward()
                 optimizer.step()
 
             if self.run_dev:
-                self.runOnDev(tagger, padder)
-            print("missed value = " + str(self.wTran.cntr))
-            self.wTran.cntr = 0
-            print("total cntr value = " + str(self.wTran.total_cntr))
-            self.wTran.total_cntr = 0
+                self.runOnDev(tagger)
+
             print("epoch: " + str(epoch) + " " + str(loss_acc))
             print("Train accuracy " + str(correct_cntr/total_cntr))
 
@@ -551,7 +419,7 @@ class Run(object):
 
 
 FAVORITE_RUN_PARAMS = {
-    'EMBEDDING_DIM': 300,
+    'EMBEDDING_DIM': 100,
     'RNN_H_DIM': 200,
     'BATCH_SIZE': 100,
     'LEARNING_RATE': 0.05
@@ -573,10 +441,10 @@ if __name__ == "__main__":
                 'TEST_FILE': None, #test_file,
                 'TEST_O_FILE': None, #test_o_file,
                 'MODEL_FILE': model_file,
-                'SAVE_TO_FILE': True,
+                'SAVE_TO_FILE': False, #True,
                 'RUN_DEV' : run_dev,
                 'EPOCHS' : epochs,
-                'LOAD_PARAMS': True,
+                'LOAD_PARAMS': False,#True,
                 'DROPOUT' : True})
 
     run = Run(RUN_PARAMS)
