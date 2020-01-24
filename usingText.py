@@ -78,7 +78,7 @@ class DB(object):
         fake_keys = []
 
         self.train_iter, self.dev_iter, self.test_iter = data.BucketIterator.splits((self.train_ds, self.dev_ds, self.test_ds), 
-                batch_size=batch_size, device=deviceCPU, sort_key=lambda d: len(d.premise), shuffle=False, sort=False)
+                batch_size=batch_size, device=deviceCPU, sort_key=lambda d: len(d.premise), shuffle=True, sort=True)
 
     def getIter(self, iter_type):      
         if iter_type == "train":
@@ -120,8 +120,8 @@ class Tagger(nn.Module):
             vecs = torch.cat((vecs, pad), 0)
         pad = torch.zeros((1, vecs[0].shape[0]))
         vecs = torch.cat((vecs, pad), 0)
-        vecs[1] = torch.zeros(vecs[0].shape)
         vecs[0] = torch.zeros(vecs[0].shape)
+        vecs[1] = torch.zeros(vecs[0].shape)
         self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True)
         ## project down the vectors to 200dim
         self.project = nn.Linear(embedding_dim, projected_dim)
@@ -300,33 +300,25 @@ class Run(object):
         # print(flatten_label)
         return flatten_tag, flatten_label
 
-    def runOnDev(self, tagger, padder):
+    def runOnDev(self, tagger, dev_iter):
         tagger.eval()
-        dev_dataset = As4Dataset(self.dev_file)
 
-        dev_dataset.setTranslators(wT=self.wTran, lT=self.lTran)
-
-        dev_dataloader = DataLoader(dataset=dev_dataset,
-                                    batch_size=self.batch_size, shuffle=False,
-                                    collate_fn=padder.collate_fn)
         with torch.no_grad():
             correct_cntr = 0
             total_cntr = 0
-            for sample in dev_dataloader:
-                # batch_data_list, batch_label_list, batch_len_list, padded_sublens = sample
-                premise_data, hyp_data, batch_label_list = sample
-
-                # print(premise_data)
-                # print(hyp_data)
+            dev_iter.init_epoch()
+            for sample in dev_iter:
+          
+                premise_data, _ = sample.premise
+                hyp_data, _ = sample.hypothesis
+                batch_label = (sample.label - torch.ones(sample.label.shape)).long()
 
                 batch_tag_score = tagger.forward(premise_data, hyp_data)
-
-                # print(batch_tag_score)
-
-                flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
+                # flatten_tag, flatten_label = self._flat_vecs(batch_tag_score, batch_label_list)
 
                 # calc accuracy
-                c, t = self._calc_batch_acc(tagger, flatten_tag, flatten_label)
+                batch_label_tensor = torch.LongTensor(batch_label)
+                c, t = self._calc_batch_acc(tagger, batch_tag_score, batch_label_tensor)
                 correct_cntr += c
                 total_cntr += t
 
@@ -367,21 +359,10 @@ class Run(object):
                                         initial_accumulator_value=0.1)  # 0.01)
         if self.load_params:
             self._load_opt_params(optimizer)
-        #optimizer = torch.optim.Adadelta(tagger.parameters(), lr=self.learning_rate)
         print("done")
 
-        # print(self.wTran)
-
-        #train_dataloader = DataLoader(dataset=train_dataset,
-        #                              batch_size=self.batch_size, shuffle=True,
-        #                              collate_fn=padder.collate_fn)
-
-        #print("Starting training")
-        #print("data length = " + str(len(train_dataset)))
-
-
         if self.run_dev:
-            self.runOnDev(tagger, padder)
+            self.runOnDev(tagger, db.getIter('dev'))
         for epoch in range(self.num_epochs):
             train_iter.init_epoch()
             loss_acc = 0
@@ -399,9 +380,6 @@ class Run(object):
 
                 tagger.zero_grad()
 
-                # batch_data_list, batch_label_list, batch_len_list, padded_sublens = sample
-                #premise_data, hyp_data, batch_label_list = sample
-                
                 premise_data, _ = sample.premise
                 hyp_data, _ = sample.hypothesis
                 batch_label = (sample.label - torch.ones(sample.label.shape)).long()
@@ -425,7 +403,7 @@ class Run(object):
                 tagger.zero_grad()
 
             if self.run_dev:
-                self.runOnDev(tagger, padder)
+                self.runOnDev(tagger, db.getIter('dev'))
             #print("missed value = " + str(self.wTran.cntr))
             #self.wTran.cntr = 0
             #print("total cntr value = " + str(self.wTran.total_cntr))
@@ -462,7 +440,7 @@ if __name__ == "__main__":
                      #"sys.argv[1]
     model_file = FOLDER_PATH + '32Bbatch' #sys.argv[2]
     epochs = 50 #int(sys.argv[3])
-    run_dev = False #sys.argv[4]
+    run_dev = True #sys.argv[4]
     dev_file = FOLDER_PATH + "snli_1.0_dev.jsonl"
 
     RUN_PARAMS = FAVORITE_RUN_PARAMS
