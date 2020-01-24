@@ -120,8 +120,9 @@ class Tagger(nn.Module):
             vecs = torch.cat((vecs, pad), 0)
         pad = torch.zeros((1, vecs[0].shape[0]))
         vecs = torch.cat((vecs, pad), 0)
-        self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True,
-                                                        padding_idx=1)
+        vecs[1] = torch.zeros(vecs[0].shape)
+        vecs[0] = torch.zeros(vecs[0].shape)
+        self.wembeddings = nn.Embedding.from_pretrained(embeddings=vecs, freeze=True)
         ## project down the vectors to 200dim
         self.project = nn.Linear(embedding_dim, projected_dim)
         self.G = self.feedForward(f_dim * 2, v_dim, 0.2)
@@ -165,14 +166,8 @@ class Tagger(nn.Module):
             padded_hyp_w = hyp_data
 
 
-        print(padded_premise_w)
-        for word in padded_premise_w:
-            for v in word:
-                print(v)
         prem_w_e = self.wembeddings(padded_premise_w)
         hyp_w_e = self.wembeddings(padded_hyp_w)
-        print(prem_w_e)
-        raise Exception()
 
         # Project the embeddings to smaller vector
         prem_w_e = self.project(prem_w_e)
@@ -422,8 +417,6 @@ class Run(object):
                 total_cntr += t
 
                 # loss = loss_function(flatten_tag, flatten_label)
-                print(batch_tag_score)
-                print(batch_label_tensor)
                 loss = loss_function(batch_tag_score, batch_label_tensor)
                 loss_acc += loss.item()
                 loss.backward()
