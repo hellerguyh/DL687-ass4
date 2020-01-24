@@ -426,10 +426,10 @@ class Run(object):
 
             if self.run_dev:
                 self.runOnDev(tagger, padder)
-            print("missed value = " + str(self.wTran.cntr))
-            self.wTran.cntr = 0
-            print("total cntr value = " + str(self.wTran.total_cntr))
-            self.wTran.total_cntr = 0
+            #print("missed value = " + str(self.wTran.cntr))
+            #self.wTran.cntr = 0
+            #print("total cntr value = " + str(self.wTran.total_cntr))
+            #self.wTran.total_cntr = 0
             print("epoch: " + str(epoch) + " " + str(loss_acc))
             self.train_accuracy = correct_cntr/total_cntr
             self.train_loss = loss_acc
